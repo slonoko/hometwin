@@ -29,6 +29,23 @@ resource "azurerm_resource_group" "rg" {
   location = "westeurope"
 }
 
+
+resource "azurerm_log_analytics_workspace" "logs" {
+  name                = "twin-logs"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 120
+}
+
+resource "azurerm_application_insights" "insights" {
+  name                = "twin-appinsights"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  workspace_id        = azurerm_log_analytics_workspace.logs.id
+  application_type    = "other"
+}
+
 resource "azurerm_digital_twins_instance" "smarthometwin" {
   name                = "smarthome-twin"
   resource_group_name = azurerm_resource_group.rg.name
@@ -83,5 +100,48 @@ resource "azurerm_linux_function_app" "fnctdevclo" {
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
   service_plan_id            = azurerm_service_plan.devclo.id
 
-  site_config {}
+  site_config {
+    application_stack {
+      python_version = "3.8"
+    } 
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+resource "azurerm_eventgrid_system_topic" "eventtopic" {
+  name                   = "sensors"
+  resource_group_name    = azurerm_resource_group.rg.name
+  location               = azurerm_resource_group.rg.location
+  source_arm_resource_id = azurerm_iothub.smartiothub.id
+  topic_type             = "Microsoft.Devices.IoTHubs"
+}
+
+resource "azurerm_eventgrid_system_topic_event_subscription" "eventiottodt" {
+  name  = "eventiottodt22"
+  resource_group_name = azurerm_resource_group.rg.name
+  system_topic = azurerm_eventgrid_system_topic.eventtopic.name
+  event_delivery_schema = "EventGridSchema"
+  included_event_types = [ "Microsoft.Devices.DeviceTelemetry" ]
+  advanced_filtering_on_arrays_enabled = true
+
+  azure_function_endpoint {
+    max_events_per_batch = 1
+    preferred_batch_size_in_kilobytes = 64
+    function_id = "${azurerm_linux_function_app.fnctdevclo.id}/functions/devtocloudevent"
+  }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "store_diagnostics" {
+  name = "twin-diagnostic-fct"
+
+  target_resource_id         = azurerm_linux_function_app.fnctdevclo.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.logs.id
+
+  metric {
+    enabled = true
+    category = "AllMetrics"
+  }
 }
