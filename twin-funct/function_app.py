@@ -37,5 +37,5 @@ def main(event: func.EventGridEvent):
         temperature = body["temperature"]
         humidity = body["humidity"]
         logging.info('Device: %s, Temperature is: %s', device_id, temperature)
-        updateTwinData = [{"Temperature":temperature},{"Humidity":humidity}]
+        updateTwinData = [{ "op": "replace", "path": "/Temperature", "value": temperature },{ "op": "replace", "path": "/Humidity", "value": humidity }]
         client.update_digital_twin(device_id, updateTwinData)
